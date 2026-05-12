@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="${LITELLM_FALLBACKS_ENV:-$HOME/.config/litellm-fallbacks.env}"
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "error: config file not found: $ENV_FILE" >&2
+  echo "create it with these vars:" >&2
+  echo "  LITELLM_PROXY_URL=https://litellm.example.com" >&2
+  echo "  LITELLM_MASTER_KEY=sk-..." >&2
+  echo "  WHATSAPP_KEY_ALIAS=whatsapp" >&2
+  echo "  GEMINI_ALIAS=gemini-2.5-pro" >&2
+  echo "  OPENAI_ALIAS=gpt-5" >&2
+  exit 2
+fi
+set -a; source "$ENV_FILE"; set +a
+
+: "${LITELLM_PROXY_URL:?missing}"
+: "${LITELLM_MASTER_KEY:?missing}"
+: "${WHATSAPP_KEY_ALIAS:?missing}"
+: "${GEMINI_ALIAS:?missing}"
+: "${OPENAI_ALIAS:?missing}"
+
+DRY_RUN=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run|-n) DRY_RUN=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]:-}"
+
+AUTH=(-H "Authorization: Bearer $LITELLM_MASTER_KEY")
+JSON_HEADER=(-H "Content-Type: application/json")
+
+api() {
+  local method=$1 path=$2; shift 2
+  curl -sS -X "$method" "${LITELLM_PROXY_URL}${path}" "${AUTH[@]}" "${JSON_HEADER[@]}" "$@"
+}
+
+api_write() {
+  local method=$1 path=$2; shift 2
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[dry-run] $method ${LITELLM_PROXY_URL}${path}"
+    if [[ "${1:-}" == "-d" ]]; then
+      echo "[dry-run] body:"
+      echo "${2:-}" | jq .
+    fi
+    return 0
+  fi
+  curl -sS -X "$method" "${LITELLM_PROXY_URL}${path}" "${AUTH[@]}" "${JSON_HEADER[@]}" "$@"
+}
+
+resolve_key_token() {
+  local alias=$1
+  api GET "/key/list?return_full_object=true&include_team_keys=true&size=100" \
+    | jq -r --arg a "$alias" '(.keys // .data)[] | select(.key_alias == $a) | .token' \
+    | head -1
+}
+
+cmd_verify() {
+  echo "-> proxy URL: $LITELLM_PROXY_URL"
+  echo "-> testing /health/readiness ..."
+  local code
+  code=$(curl -sS -o /tmp/.litellm-fb-health -w '%{http_code}' "$LITELLM_PROXY_URL/health/readiness" "${AUTH[@]}" || true)
+  echo "   HTTP $code"
+  [[ "$code" == "200" ]] || { echo "   body: $(cat /tmp/.litellm-fb-health 2>/dev/null | head -3)"; }
+
+  echo "-> resolving WhatsApp key via /key/list (alias=$WHATSAPP_KEY_ALIAS) ..."
+  local tok; tok=$(resolve_key_token "$WHATSAPP_KEY_ALIAS")
+  if [[ -n "$tok" ]]; then
+    echo "   ok: WhatsApp key found (token=${tok:0:12}...)"
+  else
+    echo "   FAIL: could not resolve key alias '$WHATSAPP_KEY_ALIAS' via /key/list"
+    return 1
+  fi
+
+  echo "-> checking models exist ..."
+  local models; models=$(api GET "/v1/models" | jq -r '.data[].id' 2>/dev/null || true)
+  for m in "$GEMINI_ALIAS" "$OPENAI_ALIAS"; do
+    if echo "$models" | grep -Fxq "$m"; then
+      echo "   ok: $m"
+    else
+      echo "   WARN: model alias '$m' not in /v1/models output"
+    fi
+  done
+  echo "-> all checks complete"
+}
+
+cmd_list() {
+  local token
+  token=$(resolve_key_token "$WHATSAPP_KEY_ALIAS")
+  if [[ -z "$token" ]]; then
+    echo "error: no key found for alias: $WHATSAPP_KEY_ALIAS" >&2
+    exit 1
+  fi
+  echo "key_alias=$WHATSAPP_KEY_ALIAS  token=${token:0:12}..."
+  api GET "/key/info?key=$token" \
+    | jq '{key_alias: .info.key_alias, models: .info.models, metadata: .info.metadata, router_settings: (.router_settings // .info.router_settings // .info.metadata.router_settings // null)}'
+}
+
+cmd_set_key() {
+  local token
+  token=$(resolve_key_token "$WHATSAPP_KEY_ALIAS")
+  [[ -z "$token" ]] && { echo "error: no key for alias $WHATSAPP_KEY_ALIAS" >&2; exit 1; }
+  local body
+  body=$(jq -n \
+    --arg key "$token" \
+    --arg gem "$GEMINI_ALIAS" \
+    --arg oai "$OPENAI_ALIAS" \
+    '{
+      key: $key,
+      router_settings: {
+        fallbacks: [ {($gem): [$oai]}, {($oai): [$gem]} ],
+        num_retries: 2,
+        allowed_fails: 3,
+        cooldown_time: 60,
+        timeout: 30
+      }
+    }')
+  echo "-> POST /key/update with bidirectional fallbacks ($GEMINI_ALIAS <-> $OPENAI_ALIAS)"
+  api_write POST "/key/update" -d "$body" | { [[ "$DRY_RUN" -eq 1 ]] && cat || jq .; }
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    echo
+    echo "-> verifying via /key/info"
+    cmd_list
+  fi
+}
+
+cmd_clear_key() {
+  local token
+  token=$(resolve_key_token "$WHATSAPP_KEY_ALIAS")
+  [[ -z "$token" ]] && { echo "error: no key for alias $WHATSAPP_KEY_ALIAS" >&2; exit 1; }
+  local body
+  body=$(jq -n --arg key "$token" '{key: $key, router_settings: {}}')
+  echo "-> POST /key/update clearing router_settings for $WHATSAPP_KEY_ALIAS"
+  api_write POST "/key/update" -d "$body" | { [[ "$DRY_RUN" -eq 1 ]] && cat || jq .; }
+}
+
+cmd_set_global() {
+  local body
+  body=$(jq -n --arg gem "$GEMINI_ALIAS" --arg oai "$OPENAI_ALIAS" \
+    '{model: $gem, fallback_models: [$oai], fallback_type: "general"}')
+  echo "-> POST /fallback ($GEMINI_ALIAS -> $OPENAI_ALIAS)"
+  api_write POST "/fallback" -d "$body" | { [[ "$DRY_RUN" -eq 1 ]] && cat || jq .; }
+  body=$(jq -n --arg gem "$GEMINI_ALIAS" --arg oai "$OPENAI_ALIAS" \
+    '{model: $oai, fallback_models: [$gem], fallback_type: "general"}')
+  echo "-> POST /fallback ($OPENAI_ALIAS -> $GEMINI_ALIAS)"
+  api_write POST "/fallback" -d "$body" | { [[ "$DRY_RUN" -eq 1 ]] && cat || jq .; }
+}
+
+usage() {
+  cat <<USAGE
+litellm-fallbacks - manage LiteLLM proxy fallbacks
+
+usage:
+  litellm-fallbacks verify             check proxy reachability, master-key auth, and model aliases
+  litellm-fallbacks list               show current per-key router_settings for the WhatsApp key
+  litellm-fallbacks set-key            apply bidirectional GEMINI <-> OPENAI fallbacks to the WhatsApp key
+  litellm-fallbacks clear-key          remove per-key router_settings from the WhatsApp key
+  litellm-fallbacks set-global         apply bidirectional fallbacks globally (all keys) via /fallback
+
+flags:
+  --dry-run, -n                        print the request body without sending (works on set-* and clear-key)
+
+config file: \$LITELLM_FALLBACKS_ENV (default: ~/.config/litellm-fallbacks.env)
+USAGE
+}
+
+case "${1:-}" in
+  verify)       cmd_verify ;;
+  list)         cmd_list ;;
+  set-key)      cmd_set_key ;;
+  clear-key)    cmd_clear_key ;;
+  set-global)   cmd_set_global ;;
+  ""|-h|--help) usage ;;
+  *) echo "unknown subcommand: $1" >&2; usage; exit 2 ;;
+esac
