@@ -67,11 +67,6 @@ RUN uv sync --frozen --no-install-project --no-install-workspace --no-default-gr
     --extra saml \
     --python python3
 
-# Pillow is required for Ollama multimodal (image) requests.
-# Upstream litellm imports it lazily; install it explicitly so requests don't
-# fail with ModuleNotFoundError at runtime.
-RUN uv pip install --python /app/.venv/bin/python --no-cache Pillow
-
 # Copy full source tree
 COPY . .
 
@@ -92,6 +87,12 @@ RUN uv sync --frozen --no-default-groups --no-editable \
     --extra semantic-router \
     --extra saml \
     --python python3
+
+# Pillow is required for Ollama multimodal (image) requests. litellm imports it
+# lazily, and it is not part of the synced extras, so install it explicitly.
+# MUST come after the final `uv sync`: uv sync prunes anything outside the
+# resolved set, which silently removed Pillow when this ran earlier.
+RUN uv pip install --python /app/.venv/bin/python --no-cache Pillow
 
 RUN HOME=/opt/prisma XDG_CACHE_HOME=/opt/prisma/.cache PRISMA_BINARY_CACHE_DIR=/opt/prisma/binaries \
     npm_config_cache=/root/.npm \
