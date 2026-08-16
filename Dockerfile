@@ -67,6 +67,11 @@ RUN uv sync --frozen --no-install-project --no-install-workspace --no-default-gr
     --extra saml \
     --python python3
 
+# Pillow is required for Ollama multimodal (image) requests.
+# Upstream litellm imports it lazily; install it explicitly so requests don't
+# fail with ModuleNotFoundError at runtime.
+RUN uv pip install --python /app/.venv/bin/python --no-cache Pillow
+
 # Copy full source tree
 COPY . .
 
