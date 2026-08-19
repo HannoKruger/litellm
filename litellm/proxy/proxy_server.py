@@ -9616,6 +9616,13 @@ async def model_list(
         # Hide paused/unhealthy models from the public listing
         if hidden_names:
             all_models = [m for m in all_models if m not in hidden_names]
+        # homelab: wildcard ROUTE names (e.g. "gemini/*") are not real models - calling
+        # one 404s. Upstream _get_wildcard_models() only strips them when the router has
+        # no deployment, so configured wildcards leak into /v1/models regardless of
+        # return_wildcard_routes. Hide them here (presentation only - routing and auth
+        # are untouched, so m5mac/<anything> still resolves via the wildcard route).
+        if not return_wildcard_routes:
+            all_models = [m for m in all_models if not m.endswith("/*")]
 
         # Surface the public team name by default; legacy internal keys via flag.
         # The internal routing key drives the metadata/fallback lookup, while the
@@ -9660,6 +9667,13 @@ async def model_list(
     # Hide paused/unhealthy models from the public listing
     if hidden_names:
         all_models = [m for m in all_models if m not in hidden_names]
+    # homelab: wildcard ROUTE names (e.g. "gemini/*") are not real models - calling
+    # one 404s. Upstream _get_wildcard_models() only strips them when the router has
+    # no deployment, so configured wildcards leak into /v1/models regardless of
+    # return_wildcard_routes. Hide them here (presentation only - routing and auth
+    # are untouched, so m5mac/<anything> still resolves via the wildcard route).
+    if not return_wildcard_routes:
+        all_models = [m for m in all_models if not m.endswith("/*")]
 
     # Surface the public team name by default; legacy internal keys via flag.
     # The internal routing key drives the metadata/fallback lookup, while the
