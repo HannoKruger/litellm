@@ -21,9 +21,7 @@ def test_deepseek_supported_openai_params():
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     litellm.model_cost = litellm.get_model_cost_map(url="")
 
-    supported_openai_params = DeepInfraConfig().get_supported_openai_params(
-        model="deepinfra/deepseek-ai/DeepSeek-V3.1"
-    )
+    supported_openai_params = DeepInfraConfig().get_supported_openai_params(model="deepinfra/deepseek-ai/DeepSeek-V3.1")
     print(supported_openai_params)
     assert "reasoning_effort" in supported_openai_params
 
@@ -202,3 +200,90 @@ async def test_deepinfra_tool_message_content_transformation_async():
     print(f"✓ Async test passed: {tool_message['content']}")
 
     print("\n✅ DeepInfra async tool message transformation test passed!")
+
+
+MODELS_PAYLOAD = {
+    "object": "list",
+    "data": [
+        {"id": "Qwen/Qwen3.8-27B", "object": "model", "owned_by": "deepinfra"},
+        {"id": "moonshotai/Kimi-K2-Instruct", "object": "model", "owned_by": "deepinfra"},
+        {"object": "model", "owned_by": "deepinfra"},
+    ],
+}
+
+
+class _FakeResponse:
+    def __init__(self, json_data, status_code=200, text=""):
+        self._json = json_data
+        self.status_code = status_code
+        self.text = text
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError("error", request=httpx.Request("GET", "https://x"), response=None)
+
+    def json(self):
+        return self._json
+
+
+class _RecordingClient:
+    def __init__(self, response):
+        self._response = response
+        self.requests = []
+
+    def get(self, url, headers=None, **kwargs):
+        self.requests.append((url, headers))
+        return self._response
+
+
+def test_get_models_returns_live_provider_catalogue_namespaced():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _RecordingClient(_FakeResponse(MODELS_PAYLOAD))
+
+    models = DeepInfraConfig().get_models(api_key="sk-test", client=client)
+
+    assert models == ["deepinfra/Qwen/Qwen3.8-27B", "deepinfra/moonshotai/Kimi-K2-Instruct"]
+
+
+def test_get_models_queries_openai_compatible_endpoint_with_bearer_key():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _RecordingClient(_FakeResponse(MODELS_PAYLOAD))
+
+    DeepInfraConfig().get_models(api_key="sk-test", client=client)
+
+    assert client.requests == [("https://api.deepinfra.com/v1/openai/models", {"Authorization": "Bearer sk-test"})]
+
+
+def test_get_models_honours_custom_api_base():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _RecordingClient(_FakeResponse(MODELS_PAYLOAD))
+
+    DeepInfraConfig().get_models(api_key="sk-test", api_base="https://proxy.internal/v1/openai/", client=client)
+
+    assert client.requests[0][0] == "https://proxy.internal/v1/openai/models"
+
+
+def test_get_models_raises_on_http_error_instead_of_returning_a_list():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _RecordingClient(_FakeResponse(None, status_code=503, text="upstream down"))
+
+    with pytest.raises(Exception, match="503"):
+        DeepInfraConfig().get_models(api_key="sk-test", client=client)
+
+
+def test_get_valid_models_uses_provider_api_not_static_cost_map(monkeypatch):
+    from litellm.utils import _model_cache, get_valid_models
+
+    monkeypatch.setattr(litellm, "module_level_client", _RecordingClient(_FakeResponse(MODELS_PAYLOAD)))
+    _model_cache.flush_cache()
+
+    models = get_valid_models(check_provider_endpoint=True, custom_llm_provider="deepinfra", api_key="sk-test")
+
+    assert "deepinfra/Qwen/Qwen3.8-27B" in models
+    assert "deepinfra/Qwen/Qwen3-32B" not in models

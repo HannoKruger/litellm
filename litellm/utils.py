@@ -235,6 +235,7 @@ except (ImportError, AttributeError, TypeError):
 claude_json_str = json.dumps(json_data)
 import importlib.metadata
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final, Literal, Optional, Union, cast, get_args
 
 from litellm import utils as litellm_utils
@@ -7774,6 +7775,22 @@ def _get_model_cost_entry_for_provider_config(
     return {}
 
 
+_EAGER_PROVIDER_MODEL_INFO_FACTORIES: Final[Mapping[LlmProviders, Callable[[], BaseLLMModelInfo]]] = MappingProxyType(
+    {
+        LlmProviders.FIREWORKS_AI: lambda: litellm.FireworksAIConfig(),
+        LlmProviders.OPENAI: lambda: litellm.OpenAIGPTConfig(),
+        LlmProviders.GEMINI: lambda: litellm.GeminiModelInfo(),
+        LlmProviders.LITELLM_PROXY: lambda: litellm.LiteLLMProxyChatConfig(),
+        LlmProviders.TOPAZ: lambda: litellm.TopazModelInfo(),
+        LlmProviders.ANTHROPIC: lambda: litellm.AnthropicModelInfo(),
+        LlmProviders.XAI: lambda: litellm.XAIModelInfo(),
+        LlmProviders.DEEPINFRA: lambda: litellm.DeepInfraConfig(),
+        LlmProviders.LEMONADE: lambda: litellm.LemonadeChatConfig(),
+        LlmProviders.CLARIFAI: lambda: litellm.ClarifaiConfig(),
+    }
+)
+
+
 class ProviderConfigManager:
     # Dictionary mapping for O(1) provider lookup
     # Stores tuples of (factory_function, needs_model_parameter)
@@ -8525,39 +8542,24 @@ class ProviderConfigManager:
         model: str | None,
         provider: LlmProviders,
     ) -> BaseLLMModelInfo | None:
-        if LlmProviders.FIREWORKS_AI == provider:
-            return litellm.FireworksAIConfig()
-        elif LlmProviders.OPENAI == provider:
-            return litellm.OpenAIGPTConfig()
-        elif LlmProviders.GEMINI == provider:
-            return litellm.GeminiModelInfo()
-        elif LlmProviders.VERTEX_AI == provider:
+        eager_factory: Final = _EAGER_PROVIDER_MODEL_INFO_FACTORIES.get(provider)
+        if eager_factory is not None:
+            return eager_factory()
+        if LlmProviders.VERTEX_AI == provider:
             from litellm.llms.vertex_ai.common_utils import VertexAIModelInfo
 
             return VertexAIModelInfo()
-        elif LlmProviders.LITELLM_PROXY == provider:
-            return litellm.LiteLLMProxyChatConfig()
-        elif LlmProviders.TOPAZ == provider:
-            return litellm.TopazModelInfo()
-        elif LlmProviders.ANTHROPIC == provider:
-            return litellm.AnthropicModelInfo()
-        elif LlmProviders.XAI == provider:
-            return litellm.XAIModelInfo()
-        elif LlmProviders.OLLAMA == provider or LlmProviders.OLLAMA_CHAT == provider:
+        elif provider in (LlmProviders.OLLAMA, LlmProviders.OLLAMA_CHAT):
             # Dynamic model listing for Ollama server
             from litellm.llms.ollama.common_utils import OllamaModelInfo
 
             return OllamaModelInfo()
-        elif LlmProviders.VLLM == provider or LlmProviders.HOSTED_VLLM == provider:
+        elif provider in (LlmProviders.VLLM, LlmProviders.HOSTED_VLLM):
             from litellm.llms.vllm.common_utils import (
                 VLLMModelInfo,  # experimental approach, to reduce bloat on __init__.py
             )
 
             return VLLMModelInfo()
-        elif LlmProviders.LEMONADE == provider:
-            return litellm.LemonadeChatConfig()
-        elif LlmProviders.CLARIFAI == provider:
-            return litellm.ClarifaiConfig()
         elif LlmProviders.BEDROCK == provider:
             from litellm.llms.bedrock.common_utils import BedrockModelInfo
 

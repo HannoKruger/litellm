@@ -2,11 +2,25 @@ import json
 from collections.abc import Coroutine
 from typing import Any, Final, Literal, cast, overload
 
+import httpx
+from pydantic import BaseModel
+
 import litellm
 from litellm.constants import MIN_NON_ZERO_TEMPERATURE
+from litellm.llms.custom_httpx.http_handler import HTTPHandler
 from litellm.llms.openai.chat.gpt_transformation import OpenAIGPTConfig
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import AllMessageValues
+
+DEEPINFRA_DEFAULT_API_BASE: Final = "https://api.deepinfra.com/v1/openai"
+
+
+class _DeepInfraModelEntry(BaseModel):
+    id: str | None = None
+
+
+class _DeepInfraModelList(BaseModel):
+    data: tuple[_DeepInfraModelEntry, ...] = ()
 
 
 class DeepInfraConfig(OpenAIGPTConfig):
@@ -194,6 +208,28 @@ class DeepInfraConfig(OpenAIGPTConfig):
         self, api_base: str | None, api_key: str | None
     ) -> tuple[str | None, str | None]:
         # deepinfra is openai compatible, we just need to set this to custom_openai and have the api_base be https://api.endpoints.anyscale.com/v1
-        api_base = api_base or get_secret_str("DEEPINFRA_API_BASE") or "https://api.deepinfra.com/v1/openai"
+        api_base = api_base or get_secret_str("DEEPINFRA_API_BASE") or DEEPINFRA_DEFAULT_API_BASE
         dynamic_api_key: Final = api_key or get_secret_str("DEEPINFRA_API_KEY")
         return api_base, dynamic_api_key
+
+    def get_models(
+        self,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        client: HTTPHandler | None = None,
+    ) -> list[str]:  # mutable-ok: BaseLLMModelInfo.get_models fixes this return type
+        resolved_base, resolved_key = self._get_openai_compatible_provider_info(api_base, api_key)
+        base: Final = (resolved_base or DEEPINFRA_DEFAULT_API_BASE).rstrip("/")
+        auth: Final = {"Authorization": f"Bearer {resolved_key}"} if resolved_key else {}  # mutable-ok: httpx arg
+        response: Final = (client or litellm.module_level_client).get(  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler.get takes bare dict params
+            url=f"{base}/models", headers=auth
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            raise Exception(
+                f"Failed to fetch models from DeepInfra. Status code: {response.status_code}, Response: {response.text}"
+            )
+
+        listing: Final = _DeepInfraModelList.model_validate(response.json())
+        return [f"deepinfra/{entry.id}" for entry in listing.data if entry.id]  # mutable-ok: list[str] contract
