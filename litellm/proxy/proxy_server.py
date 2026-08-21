@@ -17,6 +17,7 @@ import time
 import traceback
 import warnings
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Set as AbstractSet
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType, UnionType
 from typing import (
@@ -9490,6 +9491,24 @@ class ProxyStartupEvent:
             )
 
 
+def _filter_listed_models(
+    all_models: list[str],
+    hidden_names: AbstractSet[str] | None,
+    return_wildcard_routes: bool,
+) -> list[str]:
+    """Drop paused/unhealthy models, and wildcard ROUTE names like "gemini/*".
+
+    A wildcard route is a routing pattern, not a model, so calling one 404s. Upstream
+    _get_wildcard_models() only strips them when the router has no deployment, so configured
+    wildcards leak into /v1/models regardless of return_wildcard_routes. Filtering here is
+    presentation-only: routing and auth are untouched, so m5mac/<anything> still resolves.
+    """
+    hidden: Final = hidden_names or frozenset()
+    return [
+        model for model in all_models if model not in hidden and (return_wildcard_routes or not model.endswith("/*"))
+    ]
+
+
 #### API ENDPOINTS ####
 @router.get("/v1/models", dependencies=[Depends(user_api_key_auth)], tags=["model management"])
 @router.get(
@@ -9568,7 +9587,7 @@ async def model_list(
         )
 
     # Compute once — used in both branches below to hide paused models from the listing.
-    blocked_names: Final = llm_router.get_fully_blocked_model_names() if llm_router is not None else set()
+    blocked_names: Final[set[str]] = llm_router.get_fully_blocked_model_names() if llm_router is not None else set()
 
     # Opt-in: also hide models whose deployments are all unhealthy per background
     # health checks. Empty when health state is unavailable or stale (fail open).
@@ -9613,16 +9632,7 @@ async def model_list(
             only_model_access_groups=only_model_access_groups or False,
         )
 
-        # Hide paused/unhealthy models from the public listing
-        if hidden_names:
-            all_models = [m for m in all_models if m not in hidden_names]
-        # homelab: wildcard ROUTE names (e.g. "gemini/*") are not real models - calling
-        # one 404s. Upstream _get_wildcard_models() only strips them when the router has
-        # no deployment, so configured wildcards leak into /v1/models regardless of
-        # return_wildcard_routes. Hide them here (presentation only - routing and auth
-        # are untouched, so m5mac/<anything> still resolves via the wildcard route).
-        if not return_wildcard_routes:
-            all_models = [m for m in all_models if not m.endswith("/*")]
+        all_models = _filter_listed_models(all_models, hidden_names, bool(return_wildcard_routes))
 
         # Surface the public team name by default; legacy internal keys via flag.
         # The internal routing key drives the metadata/fallback lookup, while the
@@ -9664,16 +9674,7 @@ async def model_list(
         user_api_key_cache=user_api_key_cache,
     )
 
-    # Hide paused/unhealthy models from the public listing
-    if hidden_names:
-        all_models = [m for m in all_models if m not in hidden_names]
-    # homelab: wildcard ROUTE names (e.g. "gemini/*") are not real models - calling
-    # one 404s. Upstream _get_wildcard_models() only strips them when the router has
-    # no deployment, so configured wildcards leak into /v1/models regardless of
-    # return_wildcard_routes. Hide them here (presentation only - routing and auth
-    # are untouched, so m5mac/<anything> still resolves via the wildcard route).
-    if not return_wildcard_routes:
-        all_models = [m for m in all_models if not m.endswith("/*")]
+    all_models = _filter_listed_models(all_models, hidden_names, bool(return_wildcard_routes))
 
     # Surface the public team name by default; legacy internal keys via flag.
     # The internal routing key drives the metadata/fallback lookup, while the
@@ -9755,7 +9756,7 @@ async def model_info(
 
     # Mirror /v1/models' visibility filter so first-occurrence resolution
     # cannot land on a deployment the listing had hidden.
-    blocked_names: Final = llm_router.get_fully_blocked_model_names() if llm_router is not None else set()
+    blocked_names: Final[set[str]] = llm_router.get_fully_blocked_model_names() if llm_router is not None else set()
     unhealthy_names: set[str] = set()
     if healthy_only and llm_router is not None:
         unhealthy_names = await llm_router.async_get_fully_unhealthy_model_names()

@@ -6208,6 +6208,7 @@ def embedding(
             custom_llm_provider == "openai"
             or custom_llm_provider == "together_ai"
             or custom_llm_provider == "nvidia_nim"
+            or custom_llm_provider == "deepinfra"
             or custom_llm_provider == "litellm_proxy"
             or (model in litellm.open_ai_embedding_models and custom_llm_provider is None)
         ):
