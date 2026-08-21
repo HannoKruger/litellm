@@ -220,9 +220,14 @@ class DeepInfraConfig(OpenAIGPTConfig):
     ) -> list[str]:  # mutable-ok: BaseLLMModelInfo.get_models fixes this return type
         resolved_base, resolved_key = self._get_openai_compatible_provider_info(api_base, api_key)
         base: Final = (resolved_base or DEEPINFRA_DEFAULT_API_BASE).rstrip("/")
-        auth: Final = {"Authorization": f"Bearer {resolved_key}"} if resolved_key else {}  # mutable-ok: httpx arg
-        response: Final = (client or litellm.module_level_client).get(  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler.get takes bare dict params
-            url=f"{base}/models", headers=auth
+        http: Final = client or litellm.module_level_client
+        url: Final = f"{base}/models"
+        auth: Final = {"Authorization": f"Bearer {resolved_key}"} if resolved_key else None  # mutable-ok: httpx arg
+        attempt: Final = http.get(url=url, headers=auth)  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler.get takes bare dict params
+        response: Final = (
+            http.get(url=url, headers=None)  # pyright: ignore[reportUnknownMemberType]  # HTTPHandler.get takes bare dict params
+            if auth is not None and attempt.status_code in (401, 403)
+            else attempt
         )
         try:
             response.raise_for_status()

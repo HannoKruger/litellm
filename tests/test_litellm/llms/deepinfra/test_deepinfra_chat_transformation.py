@@ -287,3 +287,33 @@ def test_get_valid_models_uses_provider_api_not_static_cost_map(monkeypatch):
 
     assert "deepinfra/Qwen/Qwen3.8-27B" in models
     assert "deepinfra/Qwen/Qwen3-32B" not in models
+
+
+class _SequenceClient:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.requests = []
+
+    def get(self, url, headers=None, **kwargs):
+        self.requests.append((url, headers))
+        return self._responses.pop(0)
+
+
+def test_get_models_retries_unauthenticated_when_the_key_is_rejected():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _SequenceClient([_FakeResponse(None, status_code=401, text="unauthorized"), _FakeResponse(MODELS_PAYLOAD)])
+
+    models = DeepInfraConfig().get_models(api_key="sk-stale", client=client)
+
+    assert models == ["deepinfra/Qwen/Qwen3.8-27B", "deepinfra/moonshotai/Kimi-K2-Instruct"]
+    assert [headers for _, headers in client.requests] == [{"Authorization": "Bearer sk-stale"}, None]
+
+
+def test_get_models_still_raises_on_non_auth_errors():
+    from litellm.llms.deepinfra.chat.transformation import DeepInfraConfig
+
+    client = _SequenceClient([_FakeResponse(None, status_code=503, text="upstream down")])
+
+    with pytest.raises(Exception, match="503"):
+        DeepInfraConfig().get_models(api_key="sk-test", client=client)
