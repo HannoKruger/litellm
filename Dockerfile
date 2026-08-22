@@ -129,6 +129,14 @@ COPY --from=builder /app/litellm/proxy/prisma_migration.py /app/litellm/proxy/pr
 # enterprise.enterprise_hooks from it)
 COPY --from=builder /app/enterprise /app/enterprise
 COPY --from=builder /app/litellm-proxy-extras /app/litellm-proxy-extras
+# Homelab: provider_pricing.py is a custom LiteLLM callback, so it has to be a
+# real importable file -- LiteLLM resolves `provider_pricing.sync` through
+# get_instance_fn against the working directory, and no amount of DB config can
+# supply code. Baking it into the image is what lets the Dokploy file mount go
+# away: code ships with the image, configuration lives in the proxy's Postgres.
+COPY --from=builder /app/provider_pricing.py /app/provider_pricing.py
+# Inert stub that only exists to satisfy `--config`; see the file's own comment.
+COPY --from=builder /app/homelab-bootstrap-config.yaml /app/config.yaml
 # Prisma CLI + engines are baked under /opt/prisma, a fixed path every
 # runtime uid can read and that no cache volume mount shadows. The paths are
 # pinned via PRISMA_BINARY_CACHE_DIR / PRISMA_CLI_PATH and recorded into the

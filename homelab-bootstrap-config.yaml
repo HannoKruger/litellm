@@ -1,0 +1,19 @@
+# Inert bootstrap config for the homelab LiteLLM deployment.
+#
+# All real configuration -- models, litellm_settings, general_settings,
+# router_settings -- lives in LiteLLM's own Postgres (LiteLLM_ProxyModelTable
+# and LiteLLM_Config) and is managed through the Admin UI / REST API. Nothing
+# operational belongs in this file.
+#
+# It exists only because the proxy needs a --config path to reach the DB at
+# all: proxy_server.initialize() guards its load_config() call with `if
+# config:`, so starting with no --config skips the config-load chain entirely
+# and the DB overlay never runs. A path that resolves to an (almost) empty
+# mapping is the smallest thing that satisfies that guard -- note that a
+# genuinely empty file is rejected, since _get_config_from_file raises
+# "Config cannot be None or Empty" when yaml.safe_load returns None.
+#
+# Adding settings here would reintroduce the split-brain this replaced: the DB
+# overlay deep-merges over the YAML per key, so a value set in both places is
+# silently won by the DB and the YAML copy becomes a lie.
+model_list: []
