@@ -1,19 +1,57 @@
-# Inert bootstrap config for the homelab LiteLLM deployment.
+# Bootstrap config for the homelab LiteLLM deployment.
 #
-# All real configuration -- models, litellm_settings, general_settings,
-# router_settings -- lives in LiteLLM's own Postgres (LiteLLM_ProxyModelTable
-# and LiteLLM_Config) and is managed through the Admin UI / REST API. Nothing
-# operational belongs in this file.
+# The rule for this file: it carries ONLY the settings that provably cannot be
+# loaded from the proxy database, and nothing else. Every key here is absent
+# from LiteLLM_Config, and every key in LiteLLM_Config is absent here, so no
+# setting has two homes and the DB-over-YAML deep merge never has to arbitrate.
 #
-# It exists only because the proxy needs a --config path to reach the DB at
-# all: proxy_server.initialize() guards its load_config() call with `if
-# config:`, so starting with no --config skips the config-load chain entirely
-# and the DB overlay never runs. A path that resolves to an (almost) empty
-# mapping is the smallest thing that satisfies that guard -- note that a
-# genuinely empty file is rejected, since _get_config_from_file raises
-# "Config cannot be None or Empty" when yaml.safe_load returns None.
+# Models and callbacks live in the DB (LiteLLM_ProxyModelTable and
+# LiteLLM_Config.litellm_settings.callbacks) and are managed through the Admin
+# UI / REST API. Both are applied by their own runtime paths, so they load from
+# the DB correctly. `model_list: []` stays because _get_config_from_file rejects
+# a file that yaml.safe_load reads as None ("Config cannot be None or Empty"),
+# and --config itself has to keep pointing at a real path because
+# proxy_server.initialize() guards load_config() with `if config:`.
 #
-# Adding settings here would reintroduce the split-brain this replaced: the DB
-# overlay deep-merges over the YAML per key, so a value set in both places is
-# silently won by the DB and the YAML copy becomes a lie.
+# What cannot come from the DB, and why:
+#
+#   cache / cache_params  litellm.cache is constructed inside load_config's YAML
+#                         walk (`if key == "cache" and value is True`), which
+#                         builds a Cache object. The DB overlay only reaches
+#                         litellm_settings keys listed in
+#                         LITELLM_SETTINGS_SAFE_DB_OVERRIDES, applied as a bare
+#                         setattr -- and "cache" is not in that list, nor would
+#                         setattr(litellm, "cache", True) build a Cache. Setting
+#                         it in the DB alone leaves Redis response caching off
+#                         and /cache/ping answering 503.
+#
+#   request_timeout       Same walk. Left to the DB, the router falls back to its
+#                         6000s default, so a hung upstream ties up a request for
+#                         100 minutes instead of 10.
+#
+#   router_settings       The Router is constructed from this section during
+#     redis_*             load_config; it only wires up a shared Redis routing
+#                         cache when redis_host and redis_port are both present
+#                         at construction time (router.py: `if redis_url is not
+#                         None or (redis_host is not None and redis_port is not
+#                         None)`). Without them, cooldown and usage state is
+#                         per-process. POST /config/update also silently drops
+#                         these keys -- its ConfigYAML model has no field for
+#                         them -- so they cannot be set through the API at all.
 model_list: []
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
+  request_timeout: 600
+  drop_params: true
+  check_provider_endpoint: true
+
+router_settings:
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
