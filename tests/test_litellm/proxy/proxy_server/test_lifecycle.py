@@ -977,3 +977,55 @@ async def test_prometheus_fallback_stats_job_runs_when_the_lock_is_free_or_absen
     await jobs["prometheus_fallback_stats_job"]()
 
     assert send_fallback_stats.await_count == 2
+
+
+def test_prisma_client_setup_precedes_config_load_in_lifespan():
+    """The DB must be connected before ``load_config`` runs in the lifespan.
+
+    Regression for silently-dead DB-first config. ``get_config`` only merges the
+    ``LiteLLM_Config`` overlay when ``prisma_client`` is already set, and
+    ``load_config`` is the only place that turns settings into objects --
+    ``litellm_settings.cache: true`` is what constructs ``litellm.cache``, and
+    ``router_settings`` are baked into the Router as it is built. Setting up
+    prisma after the config load therefore skipped the overlay exactly when it
+    mattered: a deployment with an empty YAML and everything in the DB came up
+    with Redis caching never initialised and the router on its 6000s default
+    timeout, with nothing logged either way.
+
+    Source-order pin, matching ``test_otel_global_provider_published_after_callback_init``:
+    the early ``_setup_prisma_client`` call must appear before ``### LOAD CONFIG ###``.
+    """
+    wrapped = getattr(proxy_startup_event, "__wrapped__", proxy_startup_event)
+    source = inspect.getsource(wrapped)
+    early_db_pos = source.find("_early_db_url")
+    load_config_pos = source.find("### LOAD CONFIG ###")
+    assert early_db_pos != -1, "early prisma setup not found in proxy_startup_event"
+    assert load_config_pos != -1, "config load marker not found in proxy_startup_event"
+    assert early_db_pos < load_config_pos, (
+        "prisma client setup must precede the config load, otherwise the "
+        "LiteLLM_Config overlay is skipped while objects are being built"
+    )
+
+
+@pytest.mark.asyncio
+async def test_initialize_loads_config_with_no_config_file_when_db_present():
+    """``--config`` is optional for a DB-first deployment.
+
+    With no config file, ``initialize`` previously skipped ``load_config``
+    entirely, which skipped the DB overlay with it and produced a proxy with
+    zero models. ``_get_config_from_file(None)`` already returns an empty
+    scaffold for this shape, so the load must still run when a database is
+    connected -- and must still be skipped when there is none, so a plain
+    ``litellm --model ...`` invocation keeps its original behaviour.
+    """
+    observed = {}
+    for db_present in (True, False):
+        load_config = AsyncMock(return_value=(MagicMock(), [], {}))
+        with (
+            patch.object(ps, "prisma_client", MagicMock() if db_present else None),
+            patch.object(ps.proxy_config, "load_config", load_config),
+        ):
+            await ps.initialize(config=None)
+        observed[f"db_present={db_present}"] = load_config.await_count
+
+    assert normalize(observed) == {"db_present=True": 1, "db_present=False": 0}

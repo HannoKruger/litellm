@@ -135,8 +135,6 @@ COPY --from=builder /app/litellm-proxy-extras /app/litellm-proxy-extras
 # supply code. Baking it into the image is what lets the Dokploy file mount go
 # away: code ships with the image, configuration lives in the proxy's Postgres.
 COPY --from=builder /app/provider_pricing.py /app/provider_pricing.py
-# Inert stub that only exists to satisfy `--config`; see the file's own comment.
-COPY --from=builder /app/homelab-bootstrap-config.yaml /app/config.yaml
 # Prisma CLI + engines are baked under /opt/prisma, a fixed path every
 # runtime uid can read and that no cache volume mount shadows. The paths are
 # pinned via PRISMA_BINARY_CACHE_DIR / PRISMA_CLI_PATH and recorded into the

@@ -1011,6 +1011,35 @@ async def proxy_startup_event(app: FastAPI):
 
     ## CHECK MASTER KEY IN ENVIRONMENT ##
     master_key = get_secret_str("LITELLM_MASTER_KEY")
+    ### CONNECT TO DB BEFORE LOADING CONFIG ###
+    # The config load below is the only place that turns settings into objects:
+    # `litellm_settings.cache: true` is what constructs litellm.cache, and
+    # router_settings are baked into the Router as it is built. get_config()
+    # merges the DB overlay in, but only when prisma_client is already set --
+    # and prisma was previously set up *after* this block, so on a DB-first
+    # deployment (empty/absent YAML, everything in LiteLLM_Config) the overlay
+    # was skipped exactly when it mattered. Redis caching silently never
+    # initialised and the router fell back to its 6000s default timeout, with
+    # nothing logged either way.
+    #
+    # Connecting first closes that gap. It is conditional on DATABASE_URL being
+    # in the environment, so a deployment that declares its database in YAML
+    # general_settings is unaffected and still takes the original path below,
+    # which is left in place as the fallback.
+    if prisma_client is None:
+        _early_db_url: Final[str | None] = get_secret("DATABASE_URL", None)
+        if _early_db_url is not None:
+            # get_config() also gates the overlay on store_model_in_db, which is
+            # otherwise only set from general_settings during the very load we
+            # are about to run. Seed it from the environment so the gate is open
+            # in time; load_config still has the final say afterwards.
+            store_model_in_db = get_secret_bool("STORE_MODEL_IN_DB", store_model_in_db) or store_model_in_db
+            prisma_client = await ProxyStartupEvent._setup_prisma_client(
+                database_url=_early_db_url,
+                proxy_logging_obj=proxy_logging_obj,
+                user_api_key_cache=user_api_key_cache,
+            )
+
     ### LOAD CONFIG ###
     worker_config: str | dict | None = get_secret("WORKER_CONFIG")
     env_config_yaml: Final[str | None] = get_secret_str("CONFIG_FILE_PATH")
@@ -7446,7 +7475,14 @@ async def initialize(
                 verbose_router_logger.setLevel(level=logging.DEBUG)  # set router logs to debug
                 verbose_proxy_logger.setLevel(level=logging.DEBUG)  # set proxy logs to debug
     dynamic_config: Final = {"general": {}, user_model: {}}
-    if config:
+    # A DB-first deployment passes no --config at all: models, callbacks and
+    # settings all live in LiteLLM_Config / LiteLLM_ProxyModelTable. Skipping
+    # load_config in that case skips the DB overlay with it, and the proxy comes
+    # up with zero models. _get_config_from_file(None) already returns an empty
+    # scaffold for exactly this shape, so run the load and let the overlay fill
+    # it. Gated on a connected prisma_client so a plain `litellm --model ...`
+    # invocation with no database keeps its original behaviour.
+    if config or prisma_client is not None:
         (
             llm_router,
             llm_model_list,
