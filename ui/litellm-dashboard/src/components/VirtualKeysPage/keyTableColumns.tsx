@@ -12,6 +12,7 @@ import {
   IdCell,
   IdentityCell,
   ModelsCell,
+  MoneyCell,
   SpendBudgetCell,
   StatusBadge,
   type StatusTone,
@@ -324,6 +325,15 @@ export const getKeyTableColumns = ({
         />
       );
     },
+  },
+  {
+    id: "lifetime_spend",
+    accessorKey: "lifetime_spend",
+    meta: { title: "Lifetime Spend" },
+    header: "Lifetime Spend",
+    size: 130,
+    enableSorting: false,
+    cell: ({ row }) => <MoneyCell value={row.original.lifetime_spend} decimals={2} showZero />,
   },
   {
     id: "budget_reset_at",

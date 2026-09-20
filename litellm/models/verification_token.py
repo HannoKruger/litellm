@@ -61,6 +61,10 @@ class LiteLLM_VerificationToken(LiteLLMPydanticObjectBase):
     key_rotation_at: datetime | None = None
     router_settings: dict | None = None
     budget_limits: list[dict] | None = None
+    # Derived, not a column: total spend ever recorded for this key, summed from the daily
+    # spend aggregates. `spend` above only covers the current budget window, which every
+    # budget reset zeroes out.
+    lifetime_spend: float | None = None
     model_config = ConfigDict(protected_namespaces=())
 
 

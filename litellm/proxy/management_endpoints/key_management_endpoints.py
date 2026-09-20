@@ -75,6 +75,10 @@ from litellm.proxy.common_utils.timezone_utils import get_budget_reset_time
 from litellm.proxy.common_utils.user_api_key_cache import UserApiKeyCache
 from litellm.proxy.hooks.key_management_event_hooks import KeyManagementEventHooks
 from litellm.proxy.hooks.model_max_budget_limiter import build_model_max_budget_usage
+from litellm.proxy.management_endpoints.key_lifetime_spend import (
+    fetch_lifetime_spend_by_key,
+    fetch_lifetime_spend_for_key,
+)
 from litellm.proxy.management_endpoints.common_utils import (
     _check_passthrough_routes_caller_permission,
     _is_user_org_admin_for_team,
@@ -3729,6 +3733,9 @@ async def info_key_fn(
         # Attach object_permission if object_permission_id is set
         key_info = await attach_object_permission_to_dict(key_info, prisma_client)
 
+        if key_token_hash:
+            key_info["lifetime_spend"] = await fetch_lifetime_spend_for_key(prisma_client, key_token_hash)
+
         return {"key": key, "info": key_info}
     except Exception as e:
         raise handle_exception_on_proxy(e)
@@ -6108,6 +6115,12 @@ async def _list_key_helper(
             user_map = {user.user_id: user for user in users}
 
     # Prepare response
+    returns_full_objects: Final = return_full_object is True or bool(expand and "user" in expand)
+    lifetime_spend_by_key: Final[Mapping[str, float]] = (
+        await fetch_lifetime_spend_by_key(prisma_client, [key.token for key in keys if key.token])
+        if returns_full_objects
+        else {}
+    )
     key_list: Final[list[str | UserAPIKeyAuth | LiteLLM_DeletedVerificationToken]] = []
     for key in keys:
         # Convert Prisma model to dict (supports both Pydantic v1 and v2)
@@ -6135,7 +6148,8 @@ async def _list_key_helper(
                     "user_alias": created_by_user.user_alias,
                 }
 
-        if return_full_object is True or (expand and "user" in expand):
+        if returns_full_objects:
+            key_dict["lifetime_spend"] = lifetime_spend_by_key.get(key.token, 0.0)
             if use_deleted_table:
                 # Use deleted key type to preserve deleted_at, deleted_by, etc.
                 key_list.append(LiteLLM_DeletedVerificationToken.model_validate(key_dict))

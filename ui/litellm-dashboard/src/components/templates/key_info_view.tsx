@@ -627,6 +627,11 @@ export default function KeyInfoView({
                   {currentKeyData.budget_reset_at && (
                     <p className="text-sm">Resets {formatTimestamp(currentKeyData.budget_reset_at)}</p>
                   )}
+                  {currentKeyData.lifetime_spend != null && (
+                    <p className="text-sm text-muted-foreground">
+                      ${formatNumberWithCommas(currentKeyData.lifetime_spend, 2)} spent in total
+                    </p>
+                  )}
                 </div>
               </Card>
 
@@ -871,6 +876,15 @@ export default function KeyInfoView({
                   <div>
                     <p className="text-sm font-medium">Spend</p>
                     <p className="text-sm">${formatNumberWithCommas(currentKeyData.spend, 4)} USD</p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-medium">Lifetime Spend</p>
+                    <p className="text-sm">
+                      {currentKeyData.lifetime_spend != null
+                        ? `$${formatNumberWithCommas(currentKeyData.lifetime_spend, 2)} USD`
+                        : "Not available"}
+                    </p>
                   </div>
 
                   <div>

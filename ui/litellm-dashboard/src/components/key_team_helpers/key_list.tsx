@@ -32,6 +32,7 @@ export interface KeyResponse {
   key_name: string;
   key_alias: string;
   spend: number;
+  lifetime_spend?: number | null;
   max_budget: number;
   expires: string;
   models: string[];
