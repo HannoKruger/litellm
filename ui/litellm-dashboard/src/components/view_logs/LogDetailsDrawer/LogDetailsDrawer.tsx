@@ -17,6 +17,7 @@ import { getSpendString } from "@/utils/dataUtils";
 import { normalizeGuardrailEntries, sortSessionLogs, SessionLogSortMode } from "./utils";
 import { DRAWER_WIDTH } from "./constants";
 import { useLogDetails } from "@/app/(dashboard)/hooks/logDetails/useLogDetails";
+import { useUserLookup } from "@/app/(dashboard)/hooks/users/useUsers";
 
 export interface LogDetailsDrawerProps {
   open: boolean;
@@ -245,6 +246,7 @@ export function LogDetailsDrawer({
   const logDetails = useLogDetails(currentLog?.request_id, startTime, open && !!currentLog?.request_id);
   const detailsData = logDetails.data as any;
   const isLoadingDetails = logDetails.isLoading;
+  const { data: logUser } = useUserLookup(open && currentLog?.user ? currentLog.user : null);
 
   // Build an enriched log entry that merges lazy-loaded details.
   // The list endpoint may already include messages/response when store_prompts_in_spend_logs is enabled,
@@ -278,6 +280,7 @@ export function LogDetailsDrawer({
   ).length;
   const agentCount = sessionLogs.filter((row) => AGENT_CALL_TYPES.includes(row.call_type)).length;
   const mcpCount = sessionLogs.filter((row) => MCP_CALL_TYPES.includes(row.call_type)).length;
+  const cacheHitCount = sessionLogs.filter((row) => String(row.cache_hit ?? "").toLowerCase() === "true").length;
   const logsForList = isSessionMode ? sessionLogs : currentLog ? [currentLog] : [];
   const leftPanelId = isSessionMode ? sessionId || "" : currentLog?.request_id || "";
   const leftPanelDisplayId = leftPanelId.length > 14 ? `${leftPanelId.slice(0, 11)}...` : leftPanelId;
@@ -316,7 +319,7 @@ export function LogDetailsDrawer({
             <SidebarToggle
               isCollapsed={false}
               onToggle={() => setIsSidebarCollapsed(true)}
-              className="absolute top-2 left-2 z-20"
+              className="absolute top-2 left-2 z-raised"
             />
           )}
           {!isSidebarCollapsed && (
@@ -373,6 +376,11 @@ export function LogDetailsDrawer({
                     </>
                   )}
                 </div>
+                {isSessionMode && (
+                  <div className="text-[11px] text-muted-foreground font-mono whitespace-nowrap">
+                    {cacheHitCount}/{logsForList.length} cached
+                  </div>
+                )}
                 {isSessionMode && sessionTruncated && (
                   <div className="mt-1 text-[11px] text-warning font-mono">
                     Showing most recent {logsForList.length} of {sessionTotalCount}
@@ -459,6 +467,7 @@ export function LogDetailsDrawer({
                 logEntry={enrichedLog}
                 isLoadingDetails={isLoadingDetails}
                 accessToken={accessToken ?? null}
+                userEmail={logUser?.user_email || undefined}
               />
             </div>
           </div>

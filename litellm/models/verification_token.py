@@ -18,6 +18,7 @@ class LiteLLM_VerificationToken(LiteLLMPydanticObjectBase):
     key_name: str | None = None
     key_alias: str | None = None
     spend: float = 0.0
+    total_spend: float = 0.0
     max_budget: float | None = None
     expires: str | datetime | None = None
     models: list = []
@@ -31,6 +32,7 @@ class LiteLLM_VerificationToken(LiteLLMPydanticObjectBase):
     metadata: dict = {}
     tpm_limit: int | None = None
     rpm_limit: int | None = None
+    tpd_limit: int | None = None
     budget_duration: str | None = None
     budget_reset_at: datetime | None = None
     allowed_cache_controls: list | None = []
@@ -61,10 +63,6 @@ class LiteLLM_VerificationToken(LiteLLMPydanticObjectBase):
     key_rotation_at: datetime | None = None
     router_settings: dict | None = None
     budget_limits: list[dict] | None = None
-    # Derived, not a column: total spend ever recorded for this key, summed from the daily
-    # spend aggregates. `spend` above only covers the current budget window, which every
-    # budget reset zeroes out.
-    lifetime_spend: float | None = None
     model_config = ConfigDict(protected_namespaces=())
 
 
@@ -72,6 +70,7 @@ class LiteLLM_DeletedVerificationToken(LiteLLM_VerificationToken):
     """Audit record for deleted keys; mirrors the token plus deletion metadata."""
 
     id: str | None = None
+    organization_id: str | None = None
     deleted_at: datetime | None = None
     deleted_by: str | None = None
     deleted_by_api_key: str | None = None

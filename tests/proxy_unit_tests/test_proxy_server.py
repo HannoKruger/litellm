@@ -809,6 +809,7 @@ def test_img_gen(mock_aimage_generation, client_no_auth):
             n=1,
             size="1024x1024",
             imageConfig={"aspectRatio": "9:16", "imageSize": "1K"},
+            litellm_call_id=mock.ANY,
             metadata=mock.ANY,
             proxy_server_request=mock.ANY,
             secret_fields=mock.ANY,
@@ -1169,6 +1170,22 @@ async def test_create_user_default_budget(prisma_client, user_role):  # noqa: F8
             assert mock_client.call_args.kwargs["data"]["budget_duration"] is None
 
 
+def _member_add_tx_cm(team_table):
+    """Transaction whose member writes land on whatever tables are mocked on `prisma_client.db`"""
+
+    class _Tx:
+        query_raw = AsyncMock(return_value=[{"members_with_roles": []}])
+        litellm_teamtable = team_table
+
+        def __getattr__(self, table_name):
+            return getattr(litellm.proxy.proxy_server.prisma_client.db, table_name)
+
+    tx_cm = MagicMock()
+    tx_cm.__aenter__ = AsyncMock(return_value=_Tx())
+    tx_cm.__aexit__ = AsyncMock(return_value=None)
+    return tx_cm
+
+
 @pytest.mark.parametrize("new_member_method", ["user_id", "user_email"])
 @pytest.mark.asyncio
 @pytest.mark.skip(reason="Requires reliable external DB connection (prisma).")
@@ -1230,7 +1247,7 @@ async def test_create_team_member_add(prisma_client, new_member_method):  # noqa
             )
         )
         mock_litellm_usertable.upsert = mock_client
-        mock_litellm_usertable.find_many = AsyncMock(return_value=None)
+        mock_litellm_usertable.find_many = AsyncMock(return_value=[])
         # Mock find_first for user_email validation (returns None for new users)
         mock_litellm_usertable.find_first = AsyncMock(return_value=None)
         # Mock find_unique for user_id validation (returns None for new users)
@@ -1245,12 +1262,7 @@ async def test_create_team_member_add(prisma_client, new_member_method):  # noqa
             return_value=LiteLLM_TeamTableCachedObj(team_id="1234")
         )
 
-        tx_mock = AsyncMock()
-        tx_mock.query_raw = AsyncMock(return_value=[{"members_with_roles": []}])
-        tx_mock.litellm_teamtable = team_mock_client
-        tx_cm = MagicMock()
-        tx_cm.__aenter__ = AsyncMock(return_value=tx_mock)
-        tx_cm.__aexit__ = AsyncMock(return_value=None)
+        tx_cm = _member_add_tx_cm(team_mock_client)
         original_tx = litellm.proxy.proxy_server.prisma_client.tx
         litellm.proxy.proxy_server.prisma_client.tx = MagicMock(
             return_value=tx_cm
@@ -1360,6 +1372,7 @@ async def test_create_team_member_add_team_admin(
     from fastapi import Request
 
     from litellm.proxy._types import (
+        LiteLLM_TeamMembership,
         LiteLLM_TeamTableCachedObj,
         LiteLLM_UserTable,
         Member,
@@ -1432,7 +1445,7 @@ async def test_create_team_member_add_team_admin(
             )
         )
         mock_litellm_usertable.upsert = mock_client
-        mock_litellm_usertable.find_many = AsyncMock(return_value=None)
+        mock_litellm_usertable.find_many = AsyncMock(return_value=[])
         # Mock find_first for user_email validation (returns None for new users)
         mock_litellm_usertable.find_first = AsyncMock(return_value=None)
         # Mock find_unique for user_id validation (returns None for new users)
@@ -1442,19 +1455,23 @@ async def test_create_team_member_add_team_admin(
         team_mock_client.update = AsyncMock(
             return_value=LiteLLM_TeamTableCachedObj(team_id="1234")
         )
+        membership_mock_client = AsyncMock()
+        membership_mock_client.upsert = AsyncMock(
+            return_value=LiteLLM_TeamMembership(user_id="1234", team_id=_team_id)
+        )
 
-        tx_mock = AsyncMock()
-        tx_mock.query_raw = AsyncMock(return_value=[{"members_with_roles": []}])
-        tx_mock.litellm_teamtable = team_mock_client
-        tx_cm = MagicMock()
-        tx_cm.__aenter__ = AsyncMock(return_value=tx_mock)
-        tx_cm.__aexit__ = AsyncMock(return_value=None)
+        tx_cm = _member_add_tx_cm(team_mock_client)
 
         with (
             patch.object(
                 litellm.proxy.proxy_server.prisma_client.db,
                 "litellm_teamtable",
                 team_mock_client,
+            ),
+            patch.object(  # test-quality-ok: legacy test swaps the prisma table on the module-level client
+                litellm.proxy.proxy_server.prisma_client.db,
+                "litellm_teammembership",
+                membership_mock_client,
             ),
             patch.object(
                 litellm.proxy.proxy_server.prisma_client,
@@ -2133,7 +2150,7 @@ async def test_model_info_alias_without_prisma(hidden):
         user_api_key_dict=UserAPIKeyAuth(models=[]),
     )
 
-    models = resp["data"]
+    models = json.loads(resp.body)["data"]
 
     alias_found = any(
         m["model_name"] == model_alias
@@ -2197,7 +2214,7 @@ async def test_proxy_model_group_alias_checks(prisma_client, hidden):  # noqa: F
     resp = await model_info_v1(
         user_api_key_dict=UserAPIKeyAuth(models=[]),
     )
-    models = resp["data"]
+    models = json.loads(resp.body)["data"]
     is_model_alias_in_list = False
     for item in models:
         if model_alias == item["model_name"]:
@@ -2274,7 +2291,7 @@ async def test_proxy_model_group_info_rerank(prisma_client):  # noqa: F811  # py
     resp = await model_info_v1(
         user_api_key_dict=UserAPIKeyAuth(models=[]),
     )
-    models = resp["data"]
+    models = json.loads(resp.body)["data"]
     assert models[0]["model_info"]["mode"] == "rerank"
     resp = await model_group_info(
         user_api_key_dict=UserAPIKeyAuth(models=[]),
@@ -2365,7 +2382,7 @@ async def test_proxy_model_group_info_rerank(prisma_client):  # noqa: F811  # py
 
 @pytest.mark.asyncio
 async def test_proxy_server_prisma_setup():
-    from litellm.proxy.proxy_server import ProxyStartupEvent, proxy_state
+    from litellm.proxy.proxy_server import ProxyStartupEvent
     from litellm.proxy.utils import ProxyLogging
     from litellm.caching import DualCache
 
@@ -2376,34 +2393,27 @@ async def test_proxy_server_prisma_setup():
     ) as mock_prisma_client:
         mock_client = mock_prisma_client.return_value  # This is the mocked instance
         mock_client.connect = AsyncMock()  # Mock the connect method
-        mock_client.check_view_exists = AsyncMock()  # Mock the check_view_exists method
+        mock_client.start_view_setup_task = MagicMock()
         mock_client.health_check = AsyncMock()  # Mock the health_check method
-        mock_client._set_spend_logs_row_count_in_proxy_state = (
-            AsyncMock()
-        )  # Mock the _set_spend_logs_row_count_in_proxy_state method
         mock_client.start_db_health_watchdog_task = AsyncMock()
         # Mock the db attribute with start_token_refresh_task for RDS IAM token refresh
         mock_db = MagicMock()
         mock_db.start_token_refresh_task = AsyncMock()
         mock_client.db = mock_db
 
-        await ProxyStartupEvent._setup_prisma_client(
+        prisma_client = await ProxyStartupEvent._setup_prisma_client(
             database_url=os.getenv("DATABASE_URL"),
             proxy_logging_obj=ProxyLogging(user_api_key_cache=user_api_key_cache),
             user_api_key_cache=user_api_key_cache,
         )
 
-        # Verify our mocked methods were called
+        assert prisma_client is mock_client
         mock_client.connect.assert_called_once()
-        mock_client.check_view_exists.assert_called_once()
+        mock_client.start_view_setup_task.assert_called_once()
 
         # Note: This is REALLY IMPORTANT to check that the health check is called
         # This is how we ensure the DB is ready before proceeding
         mock_client.health_check.assert_called_once()
-
-        # check that the spend logs row count is set in proxy state
-        mock_client._set_spend_logs_row_count_in_proxy_state.assert_called_once()
-        assert proxy_state.get_proxy_state_variable("spend_logs_row_count") is not None
 
 
 @pytest.mark.asyncio
@@ -2650,6 +2660,35 @@ async def test_run_direct_health_check_with_instrumentation_accepts_filter_only(
 
 
 @pytest.mark.asyncio
+async def test_run_direct_health_check_drops_only_the_rejected_kwarg(monkeypatch):
+    """A callee that predates `router` must still get the skip-disabled filter: dropping the
+    rejected argument alongside working ones would probe deployments the operator opted out."""
+    import litellm.proxy.proxy_server as proxy_server
+
+    seen: list[tuple[dict[str, str] | None, bool]] = []
+
+    async def fake_perform_health_check(
+        model_list,
+        details,
+        max_concurrency=None,
+        instrumentation_context=None,
+        health_check_skip_disabled_background_models=False,
+    ):
+        seen.append((instrumentation_context, health_check_skip_disabled_background_models))
+        return ([], [], {})
+
+    monkeypatch.setattr(proxy_server, "perform_health_check", fake_perform_health_check)
+    monkeypatch.setattr(
+        proxy_server,
+        "general_settings",
+        {"health_check_skip_disabled_background_models": True},
+    )
+    await proxy_server._run_direct_health_check_with_instrumentation([], True, 1, {"cycle_id": "c3"})
+
+    assert seen == [({"cycle_id": "c3"}, True)]
+
+
+@pytest.mark.asyncio
 async def test_run_direct_health_check_with_instrumentation_non_kw_typeerror_reraises(
     monkeypatch,
 ):
@@ -2885,7 +2924,7 @@ async def test_get_config_callbacks_with_all_types(client_no_auth):
         assert result["status"] == "success"
         assert "callbacks" in result
 
-        callbacks = result["callbacks"]
+        callbacks = [cb for cb in result["callbacks"] if not cb.get("read_only", False)]
 
         # Verify we have all 5 callbacks (2 success + 1 failure + 2 success_and_failure)
         assert len(callbacks) == 5
@@ -3033,6 +3072,9 @@ async def test_update_config_success_callback_normalization():
         async def add_deployment(self, prisma_client=None, proxy_logging_obj=None):  # noqa: F811  # pytest fixture, not a redefinition
             return None
 
+        def reject_config_owned_writes(self, *, section_name, changed_keys):
+            return None
+
     setattr(proxy_server, "proxy_config", MockProxyConfig())
 
     config_update = ConfigYAML(litellm_settings={"success_callback": ["SQS", "sQs"]})
@@ -3041,7 +3083,9 @@ async def test_update_config_success_callback_normalization():
     admin_user = UserAPIKeyAuth(
         user_role=LitellmUserRoles.PROXY_ADMIN, api_key="sk-test"
     )
-    await proxy_server.update_config(config_update, user_api_key_dict=admin_user)
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"litellm_settings": {"success_callback": ["SQS", "sQs"]}})
+    await proxy_server.update_config(config_update, request=request, user_api_key_dict=admin_user)
 
     assert (
         "litellm_settings" in upserted

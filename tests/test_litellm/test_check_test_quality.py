@@ -8,8 +8,14 @@ in the test body.
 """
 
 import importlib.util
+import os
+import subprocess
 import sys
 from pathlib import Path
+from types import MappingProxyType
+from typing import Final
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MODULE_PATH = _REPO_ROOT / "scripts" / "check_test_quality.py"
@@ -548,3 +554,124 @@ def test_the_read_may_sit_a_statement_above_the_store(tmp_path):
 def test_a_loop_storing_under_a_key_that_is_not_the_loop_variable_is_not_an_inventory(tmp_path):
     source = _HELPER_DICT_CONFTEST.replace("state[attr] =", 'state["fixed"] =')
     assert [v.code for v in checker.check_file(_written(tmp_path, source))] == []
+
+
+_FANS_OUT = checker._worker_count(checker.PARALLEL_MIN_PATHS) > 1
+_SERIAL_ONLY = "one usable core, so scan_paths stays serial and there is no fan-out to compare"
+
+
+def _corpus(tmp_path: Path, count: int) -> tuple[Path, ...]:
+    for index in range(count):
+        (tmp_path / f"test_gen_{index}.py").write_text(
+            f"def test_flagged_{index}():\n    compute()\n\n\ndef test_clean_{index}():\n    assert compute() == {index}\n",
+            encoding="utf-8",
+        )
+    return tuple(sorted(tmp_path.rglob("*.py")))
+
+
+def _run_checker(target: Path) -> list[str]:
+    completed = subprocess.run(
+        [sys.executable, str(_MODULE_PATH), str(target)],
+        capture_output=True, text=True, timeout=300,
+    )
+    return completed.stdout.splitlines()
+
+
+def test_worker_count_stays_serial_below_the_threshold():
+    assert checker._worker_count(checker.PARALLEL_MIN_PATHS - 1) == 1
+
+
+def test_worker_count_fans_out_at_the_threshold():
+    assert checker._worker_count(checker.PARALLEL_MIN_PATHS) == max(
+        1, min(os.cpu_count() or 1, checker.MAX_WORKERS)
+    )
+
+
+def test_worker_count_never_exceeds_the_cap():
+    assert checker._worker_count(100_000) <= checker.MAX_WORKERS
+
+
+def test_scan_paths_below_the_threshold_returns_every_violation(tmp_path):
+    paths = _corpus(tmp_path, 3)
+    assert checker._worker_count(len(paths)) == 1
+    assert [v.code for v in checker.scan_paths(paths)] == ["TQ001"] * 3
+
+
+@pytest.mark.skipif(not _FANS_OUT, reason=_SERIAL_ONLY)
+def test_a_fanned_out_run_reports_exactly_what_a_serial_run_reports(tmp_path):
+    paths = _corpus(tmp_path, checker.PARALLEL_MIN_PATHS + 5)
+    serial = [v.render() for v in sorted(v for path in paths for v in checker.check_file(path))]
+    assert serial, "corpus must produce violations or the comparison proves nothing"
+    assert _run_checker(tmp_path) == serial
+
+
+@pytest.mark.skipif(not _FANS_OUT, reason=_SERIAL_ONLY)
+def test_a_fanned_out_run_reports_each_generated_file_exactly_once(tmp_path):
+    paths = _corpus(tmp_path, checker.PARALLEL_MIN_PATHS + 5)
+    reported = _run_checker(tmp_path)
+    assert len(reported) == len(paths)
+    assert len({line.split(":")[0] for line in reported}) == len(paths)
+    assert all(" TQ001 " in line for line in reported)
+
+
+_VIOLATING_SNIPPETS: Final = MappingProxyType(
+    {
+        "TQ000": ("test_snippet.py", "def test_broken(:\n    pass\n"),
+        "TQ001": ("test_snippet.py", "def test_nothing():\n    compute()\n"),
+        "TQ002": (
+            "test_snippet.py",
+            "from unittest.mock import patch\n"
+            "\n"
+            "\n"
+            "def test_echo():\n"
+            "    with patch('litellm.completion') as mock_completion:\n"
+            "        run()\n"
+            "    mock_completion.assert_called_once()\n",
+        ),
+        "TQ003": ("test_snippet.py", "import sys\n\nsys.path.insert(0, '..')\n"),
+        "TQ004": ("test_snippet.py", "import os\n\nos.environ['KEY'] = 'v'\n"),
+        "TQ005": ("test_snippet.py", "import litellm\n\nlitellm.drop_params = True\n"),
+        "TQ006": ("test_snippet.py", _DIRECT_GATE),
+        "TQ007": ("conftest.py", _SNAPSHOT_CONFTEST),
+        "TQ009": (
+            "test_snippet.py",
+            'import subprocess, sys\nsubprocess.run([sys.executable, "-c", "pass"])\n',
+        ),
+    }
+)
+
+
+def test_rule_codes_match_every_code_the_checker_emits(tmp_path):
+    emitted: Final = frozenset(
+        v.code
+        for name, source in _VIOLATING_SNIPPETS.values()
+        for v in checker.check_file(_written(tmp_path, source, name))
+    )
+    for code, (name, source) in _VIOLATING_SNIPPETS.items():
+        assert code in [v.code for v in checker.check_file(_written(tmp_path, source, name))], code
+    assert emitted == checker.RULE_CODES
+
+
+def test_sys_executable_child_without_isolation_flag_is_flagged(tmp_path):
+    source = 'import subprocess, sys\nsubprocess.run([sys.executable, "-c", "pass"])\n'
+    assert _codes(tmp_path, source) == ["TQ009"]
+
+
+def test_sys_executable_child_with_dash_i_is_clean(tmp_path):
+    source = 'import subprocess, sys\nsubprocess.run([sys.executable, "-I", "-c", "pass"])\n'
+    assert _codes(tmp_path, source) == []
+
+
+def test_sys_executable_child_with_dash_p_is_clean(tmp_path):
+    source = 'import subprocess, sys\nsubprocess.run([sys.executable, "-P", "-c", "pass"])\n'
+    assert _codes(tmp_path, source) == []
+
+
+def test_non_interpreter_subprocess_call_is_untouched(tmp_path):
+    source = 'import subprocess\nsubprocess.run(["python", "-c", "pass"])\n'
+    assert _codes(tmp_path, source) == []
+
+
+def test_popen_sys_executable_tuple_is_flagged(tmp_path):
+    source = 'import subprocess, sys\nsubprocess.Popen((sys.executable, "script.py"))\n'
+    assert _codes(tmp_path, source) == ["TQ009"]
