@@ -38,6 +38,22 @@ describe("SpendBudgetCell", () => {
     expect(screen.getByRole("meter")).toHaveAttribute("aria-valuetext", "$98.85 of $3,000.00");
   });
 
+  it("shows the cents of a sub-dollar budget instead of rounding it to $0", () => {
+    // A $0.25 cap rendered with zero decimals reads "of $0", which looks like the
+    // key has no budget at all, and a $0.50 cap rounds up to "of $1", twice the
+    // real cap.
+    const { rerender } = render(<SpendBudgetCell spend={0} maxBudget={0.25} />);
+    expect(screen.getByText("of $0.25")).toBeInTheDocument();
+
+    rerender(<SpendBudgetCell spend={0} maxBudget={0.5} />);
+    expect(screen.getByText("of $0.50")).toBeInTheDocument();
+  });
+
+  it("keeps whole-dollar budgets free of trailing cents", () => {
+    render(<SpendBudgetCell spend={0} maxBudget={3} />);
+    expect(screen.getByText("of $3")).toBeInTheDocument();
+  });
+
   it("keeps the default tone below 80% usage", () => {
     const { container } = render(<SpendBudgetCell spend={50} maxBudget={100} />);
     expect(indicator(container)?.className).toContain("bg-primary");
