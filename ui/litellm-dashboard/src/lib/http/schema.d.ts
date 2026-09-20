@@ -30196,8 +30196,6 @@ export interface components {
             last_active?: string | null;
             /** Last Rotation At */
             last_rotation_at?: string | null;
-            /** Lifetime Spend */
-            lifetime_spend?: number | null;
             /** Litellm Budget Table */
             litellm_budget_table?: {
                 [key: string]: unknown;
@@ -31786,8 +31784,6 @@ export interface components {
             last_active?: string | null;
             /** Last Rotation At */
             last_rotation_at?: string | null;
-            /** Lifetime Spend */
-            lifetime_spend?: number | null;
             /** Litellm Budget Table */
             litellm_budget_table?: {
                 [key: string]: unknown;
@@ -40754,8 +40750,6 @@ export interface components {
             last_refreshed_at?: number | null;
             /** Last Rotation At */
             last_rotation_at?: string | null;
-            /** Lifetime Spend */
-            lifetime_spend?: number | null;
             /** Litellm Budget Table */
             litellm_budget_table?: {
                 [key: string]: unknown;

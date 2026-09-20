@@ -2,6 +2,9 @@ from unittest.mock import MagicMock, patch
 
 from litellm import embedding
 
+# encoding_format is pinned in every call below: without it the sync embedding path
+# posts through the raw client and asserts a LegacyAPIResponse, which a mock cannot be.
+
 
 def _mock_embedding_response():
     response = MagicMock()
@@ -26,7 +29,7 @@ def test_deepinfra_embedding_routes_to_deepinfra_not_openai(monkeypatch):
         mock_get_client.return_value = client
         client.embeddings.with_raw_response.create.return_value = _mock_embedding_response()
 
-        result = embedding(model="deepinfra/Qwen/Qwen3-Embedding-8B", input="hello world")
+        result = embedding(model="deepinfra/Qwen/Qwen3-Embedding-8B", input="hello world", encoding_format="float")
 
         client_kwargs = mock_get_client.call_args[1]
         assert client_kwargs["api_base"] == "https://api.deepinfra.com/v1/openai"
@@ -43,7 +46,7 @@ def test_deepinfra_embedding_sends_bare_model_name_upstream(monkeypatch):
         mock_get_client.return_value = client
         client.embeddings.with_raw_response.create.return_value = _mock_embedding_response()
 
-        embedding(model="deepinfra/Qwen/Qwen3-Embedding-8B", input="hello world")
+        embedding(model="deepinfra/Qwen/Qwen3-Embedding-8B", input="hello world", encoding_format="float")
 
         create_kwargs = client.embeddings.with_raw_response.create.call_args[1]
         assert create_kwargs["model"] == "Qwen/Qwen3-Embedding-8B"
