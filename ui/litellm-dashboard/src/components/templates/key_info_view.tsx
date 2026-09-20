@@ -322,9 +322,9 @@ export default function KeyInfoView({
       if (onKeyDataUpdate) {
         onKeyDataUpdate(newKeyValues);
       }
+      await queryClient.invalidateQueries({ queryKey: keyKeys.all });
       toast.success("Key updated successfully");
       setIsEditing(false);
-      // Refresh key data here if needed
     } catch (error) {
       toast.fromError(parseErrorMessage(error));
       console.error("Error updating key:", error);

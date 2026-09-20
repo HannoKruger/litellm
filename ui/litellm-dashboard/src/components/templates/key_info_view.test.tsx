@@ -1167,6 +1167,65 @@ describe("KeyInfoView", () => {
     });
   });
 
+  describe("save flow", () => {
+    const enterEditModeAsAdmin = async () => {
+      vi.mocked(useAuthorized).mockReturnValue({
+        ...baseUseAuthorizedMock,
+        userId: "proxy-admin-user",
+        userRole: "proxy_admin",
+      });
+      renderWithProviders(
+        <KeyInfoView
+          keyData={MOCK_KEY_DATA}
+          onClose={() => {}}
+          keyId="test-key-id"
+          onKeyDataUpdate={() => {}}
+          teams={[]}
+        />,
+      );
+      await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+      await userEvent.click(screen.getByRole("button", { name: /edit settings/i }));
+      await waitFor(() => expect(editViewMocks.onSubmit).toBeDefined());
+    };
+
+    beforeEach(() => {
+      editViewMocks.onSubmit = undefined;
+      vi.mocked(keyUpdateCall).mockClear();
+      vi.mocked(keyUpdateCall).mockResolvedValue({});
+    });
+
+    it("invalidates the cached key queries after a successful update so a reopened key shows the saved budget", async () => {
+      // Reproduces the real bug: the new max_budget reached the DB, but the keys
+      // list and key detail caches kept the old row, so leaving the key and
+      // opening it again showed the pre-save cap and a second save wrote it back.
+      const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+
+      await enterEditModeAsAdmin();
+      vi.mocked(keyUpdateCall).mockResolvedValue({ ...MOCK_KEY_DATA, max_budget: 33 });
+      await editViewMocks.onSubmit!({ key: MOCK_KEY_DATA.token, token: MOCK_KEY_DATA.token, max_budget: 33 });
+
+      await waitFor(() => {
+        expect(keyUpdateCall).toHaveBeenCalled();
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["keys"] });
+      });
+
+      invalidateSpy.mockRestore();
+    });
+
+    it("does not invalidate the cached key queries when the update fails", async () => {
+      const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+
+      await enterEditModeAsAdmin();
+      vi.mocked(keyUpdateCall).mockRejectedValue(new Error("budget change rejected"));
+      await editViewMocks.onSubmit!({ key: MOCK_KEY_DATA.token, token: MOCK_KEY_DATA.token, max_budget: 33 });
+
+      await waitFor(() => expect(keyUpdateCall).toHaveBeenCalled());
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ["keys"] });
+
+      invalidateSpy.mockRestore();
+    });
+  });
+
   describe("delete flow", () => {
     it("invalidates the keys list query after a successful delete so active filters survive (LIT-4080)", async () => {
       const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
