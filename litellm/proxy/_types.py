@@ -464,6 +464,9 @@ class LiteLLMRoutes(enum.Enum):
         # OCR
         "/ocr",
         "/v1/ocr",
+        # decisions
+        "/decisions",
+        "/v1/decisions",
         # containers API
         "/containers",
         "/v1/containers",

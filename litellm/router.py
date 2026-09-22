@@ -2004,6 +2004,10 @@ class Router:
         self.asearch = self.factory_function(asearch, call_type="asearch")
         self.search = self.factory_function(search, call_type="search")
 
+        from litellm.decisions import adecisions
+
+        self.adecisions = self.factory_function(adecisions, call_type="adecisions")
+
     def _initialize_video_endpoints(self):
         """Initialize video endpoints."""
         from litellm.videos import (
@@ -6527,6 +6531,7 @@ class Router:
             "ocr",
             "asearch",
             "search",
+            "adecisions",
             "aadapter_generate_content",
             "avideo_generation",
             "video_generation",
@@ -6757,6 +6762,7 @@ class Router:
                 "anthropic_messages",
                 "_arealtime",
                 "_aresponses_websocket",
+                "adecisions",
                 "acreate_fine_tuning_job",
                 "acancel_fine_tuning_job",
                 "alist_fine_tuning_jobs",

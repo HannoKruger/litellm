@@ -1454,6 +1454,7 @@ from .rust_bridge import rust
 from .rag.main import *
 from .sandbox.main import *
 from .search.main import *
+from .decisions.main import *
 from .realtime_api.main import (
     _arealtime,
     acreate_realtime_client_secret,

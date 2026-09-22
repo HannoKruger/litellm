@@ -665,6 +665,7 @@ try:
 except ImportError:
     build_billing_metrics_recorder = None
     shutdown_billing_metrics_recorder = None
+from litellm.proxy.decisions_endpoints.endpoints import router as decisions_router
 from litellm.proxy.middleware.admission_control_middleware import (
     AdmissionControlMiddleware,
     admission_control_state,
@@ -19245,6 +19246,7 @@ app.include_router(public_endpoints_router)
 app.include_router(public_v1_router)
 app.include_router(rerank_router)
 app.include_router(ocr_router)
+app.include_router(decisions_router)
 app.include_router(rag_router)
 app.include_router(video_router)
 app.include_router(container_router)

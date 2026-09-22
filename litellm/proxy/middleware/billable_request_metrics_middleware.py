@@ -78,6 +78,7 @@ _LLM_ROUTE_SUFFIXES: Final[tuple[str, ...]] = (
     "/videos",  # create; GET list is excluded by the POST gate
     "/remix",  # /v1/videos/{id}/remix
     "/ocr",
+    "/decisions",
     "/search",  # /v1/search and /v1/vector_stores/{id}/search
     "/rag/query",
     "/rag/ingest",
