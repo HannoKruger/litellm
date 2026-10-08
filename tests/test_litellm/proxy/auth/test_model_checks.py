@@ -456,6 +456,25 @@ def test_wildcard_custom_prefix_does_not_stack_provider_prefix(monkeypatch):
     assert result == ["ollama_server1/gemma3:1b", "ollama_server1/llama3:8b"]
 
 
+def test_wildcard_nested_prefix_keeps_provider_segment(monkeypatch):
+    from litellm.proxy.auth import model_checks
+    from litellm.proxy.auth.model_checks import get_known_models_from_wildcard
+    from litellm.types.router import LiteLLM_Params
+
+    monkeypatch.setattr(
+        model_checks,
+        "get_provider_models",
+        lambda provider, litellm_params=None: ["anthropic/claude-haiku-5-5"],
+    )
+
+    result = get_known_models_from_wildcard(
+        wildcard_model="proxy/anthropic/*",
+        litellm_params=LiteLLM_Params(model="anthropic/*"),
+    )
+
+    assert result == ["proxy/anthropic/claude-haiku-5-5"]
+
+
 def test_wildcard_custom_prefix_keeps_org_segment_for_non_provider_first_segment(
     monkeypatch,
 ):

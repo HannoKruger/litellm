@@ -314,8 +314,10 @@ def get_known_models_from_wildcard(wildcard_model: str, litellm_params: LiteLLM_
             # both, which would otherwise yield an uncallable "ollama_server1/ollama/gemma3:1b".
             # Only strip the leading segment when it is a known provider, so ids whose first
             # segment is an org rather than a provider (e.g. "meta-llama/Llama-3-8B") keep it.
+            # A nested prefix such as "proxy/anthropic/*" keeps the provider segment, because
+            # the router maps "proxy/anthropic/<id>" and would not match "proxy/<id>".
             leading, sep, model_suffix = model.partition("/")
-            if sep and leading in known_providers:
+            if sep and leading in known_providers and not wildcard_suffix.startswith(f"{leading}/"):
                 model = f"{wildcard_provider_prefix}/{model_suffix}"
             else:
                 model = f"{wildcard_provider_prefix}/{model}"
