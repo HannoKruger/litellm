@@ -108,6 +108,7 @@ from litellm.proxy.guardrails.tool_name_extraction import (
     extract_request_tool_names,
 )
 from litellm.proxy.route_llm_request import route_request
+from litellm.proxy.spend_tracking.budget_exclusion import model_group_is_excluded_from_budgets
 from litellm.proxy.spend_tracking.budget_reservation import get_budget_window_start
 from litellm.proxy.spend_tracking.carried_budget_state import carry_organization_budget_state
 from litellm.proxy.utils import PrismaClient, ProxyLogging, log_db_metrics
@@ -392,7 +393,8 @@ def _get_router_zero_cost_cache(llm_router: Router) -> dict[str, bool] | None:
 
 def _is_model_cost_zero(model: str | list[str] | None, llm_router: Router | None) -> bool:
     """
-    Check if a model has zero cost (no configured pricing).
+    Check if a model has zero cost (no configured pricing), or is excluded from budgets,
+    which costs it nothing against a budget either.
 
     Uses the router's get_model_group_info method to get pricing information.
 
@@ -419,6 +421,11 @@ def _is_model_cost_zero(model: str | list[str] | None, llm_router: Router | None
                     return False
                 continue
         try:
+            if model_group_is_excluded_from_budgets(model_name=model_name, llm_router=llm_router):
+                if zero_cost_cache is not None:
+                    zero_cost_cache[model_name] = True
+                continue
+
             # Use router's get_model_group_info method directly for better reliability
             model_group_info = llm_router.get_model_group_info(model_group=model_name)
 

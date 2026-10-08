@@ -70,6 +70,7 @@ from litellm.proxy.db.db_transaction_queue.window_spend_update_queue import (
 )
 from litellm.proxy.db.exception_handler import PrismaDBExceptionHandler
 from litellm.proxy.route_llm_request import ROUTE_ENDPOINT_MAPPING
+from litellm.proxy.spend_tracking.budget_exclusion import served_deployment_is_excluded_from_budgets
 from litellm.proxy.spend_tracking.compression_savings import (
     extract_compression_saved_tokens,
 )
@@ -465,7 +466,7 @@ class DBSpendUpdateWriter:
             # Single task replaces 11 create_task() calls
             asyncio.create_task(
                 self._batch_database_updates(
-                    response_cost=response_cost,
+                    response_cost=0.0 if served_deployment_is_excluded_from_budgets(kwargs) else response_cost,
                     user_id=user_id,
                     hashed_token=hashed_token,
                     team_id=team_id,

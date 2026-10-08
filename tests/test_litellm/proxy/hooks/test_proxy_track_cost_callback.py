@@ -486,6 +486,7 @@ async def test_update_database_and_spend_counters_releases_reservation_when_db_u
                 start_time=datetime.now(),
                 end_time=datetime.now(),
                 response_cost=0.2,
+                budget_cost=0.2,
                 budget_reservation=budget_reservation,
             )
 
@@ -533,6 +534,7 @@ async def test_update_database_and_spend_counters_preserves_db_exception_when_re
                 start_time=datetime.now(),
                 end_time=datetime.now(),
                 response_cost=0.2,
+                budget_cost=0.2,
                 budget_reservation=budget_reservation,
             )
 
@@ -571,6 +573,7 @@ async def test_update_database_and_spend_counters_updates_counters_after_db_upda
         start_time=start_time,
         end_time=datetime.now(),
         response_cost=0.2,
+        budget_cost=0.2,
         budget_reservation=budget_reservation,
         request_tags=["tag-a"],
         model_access_groups=("premium",),
@@ -620,6 +623,7 @@ async def test_update_database_and_spend_counters_invalidates_reservation_when_c
                 start_time=datetime.now(),
                 end_time=datetime.now(),
                 response_cost=0.2,
+                budget_cost=0.2,
                 budget_reservation=budget_reservation,
             )
 
@@ -666,6 +670,7 @@ async def test_update_database_and_spend_counters_preserves_counter_exception_wh
                 start_time=datetime.now(),
                 end_time=datetime.now(),
                 response_cost=0.2,
+                budget_cost=0.2,
                 budget_reservation=budget_reservation,
             )
 
@@ -715,6 +720,7 @@ async def test_update_database_and_spend_counters_reconciles_reservation_before_
             start_time=datetime.now(),
             end_time=datetime.now(),
             response_cost=0.2,
+            budget_cost=0.2,
             budget_reservation=budget_reservation,
         )
 
@@ -761,6 +767,7 @@ async def test_update_database_and_spend_counters_releases_reservation_when_db_u
                 start_time=datetime.now(),
                 end_time=datetime.now(),
                 response_cost=0.2,
+                budget_cost=0.2,
                 budget_reservation=budget_reservation,
             )
 
@@ -811,6 +818,7 @@ async def test_update_database_and_spend_counters_invalidates_reservation_when_e
             start_time=datetime.now(),
             end_time=datetime.now(),
             response_cost=0.2,
+            budget_cost=0.2,
             budget_reservation=budget_reservation,
         )
 

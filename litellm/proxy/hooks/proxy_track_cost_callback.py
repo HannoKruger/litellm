@@ -28,6 +28,7 @@ from litellm.proxy.db.db_spend_update_writer import (
     get_llm_router,
 )
 from litellm.proxy.litellm_pre_call_utils import LiteLLMProxyRequestSetup
+from litellm.proxy.spend_tracking.budget_exclusion import served_deployment_is_excluded_from_budgets
 from litellm.proxy.spend_tracking.spend_event import (
     ObjectMapping,
     SpendEventBuildError,
@@ -341,6 +342,7 @@ class _ProxyDBLogger(CustomLogger):
             )
 
             if response_cost is not None:
+                budget_cost: Final = 0.0 if served_deployment_is_excluded_from_budgets(kwargs) else float(response_cost)
                 user_api_key: Final = metadata.get("user_api_key", None)
                 verbose_proxy_logger.debug(
                     "user_api_key %s, user_id %s, team_id %s, end_user_id %s",
@@ -371,6 +373,7 @@ class _ProxyDBLogger(CustomLogger):
                         start_time=start_time,
                         end_time=end_time,
                         response_cost=response_cost,
+                        budget_cost=budget_cost,
                         budget_reservation=budget_reservation,
                         request_tags=tags,
                         model_access_groups=model_access_groups,
@@ -386,7 +389,7 @@ class _ProxyDBLogger(CustomLogger):
                             token=user_api_key,
                             user_id=user_id,
                             end_user_id=end_user_id,
-                            response_cost=response_cost,
+                            response_cost=budget_cost,
                             team_id=team_id,
                             parent_otel_span=parent_otel_span,
                             tags=tags,
@@ -397,7 +400,7 @@ class _ProxyDBLogger(CustomLogger):
                         token=user_api_key,
                         key_alias=key_alias,
                         end_user_id=end_user_id,
-                        response_cost=response_cost,
+                        response_cost=budget_cost,
                         max_budget=end_user_max_budget,
                     )
                 elif budget_reservation is not None:
@@ -672,6 +675,7 @@ async def _update_database_and_spend_counters(
     start_time: Any,
     end_time: Any,
     response_cost: float,
+    budget_cost: float,
     budget_reservation: dict | None,
     request_tags: list[str] | None = None,
     model_access_groups: Sequence[str] | None = None,
@@ -679,7 +683,7 @@ async def _update_database_and_spend_counters(
 ) -> bool:
     if budget_reservation is not None:
         await _reconcile_budget_reservation_before_db_update(
-            budget_reservation=budget_reservation, response_cost=response_cost
+            budget_reservation=budget_reservation, response_cost=budget_cost
         )
     try:
         charged: Final = await proxy_logging_obj.db_spend_update_writer.update_database(
@@ -717,7 +721,7 @@ async def _update_database_and_spend_counters(
             token=user_api_key,
             team_id=team_id,
             user_id=user_id,
-            response_cost=response_cost,
+            response_cost=budget_cost,
             org_id=org_id,
             budget_reservation=budget_reservation,
             end_user_id=end_user_id,
