@@ -4,11 +4,13 @@ Based on the test patterns from other rerank providers and the current DeepInfra
 """
 
 import json
+from typing import Final
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
+import litellm
 from litellm.llms.deepinfra.rerank.transformation import DeepinfraRerankConfig
 from litellm.types.rerank import (
     OptionalRerankParams,
@@ -301,3 +303,33 @@ class TestDeepinfraRerankTransform:
 
         # Should use the original error message when JSON parsing fails
         assert "Invalid JSON error message" in str(exc_info.value)
+
+    def test_rerank_cost_charges_input_tokens_times_registered_price(self):
+        model: Final = "deepinfra/example/priced-reranker"
+        price_per_token: Final = 2.5e-08
+        input_tokens: Final = 1234
+        litellm.register_model(
+            {
+                model: {
+                    "litellm_provider": "deepinfra",
+                    "mode": "rerank",
+                    "input_cost_per_token": price_per_token,
+                    "output_cost_per_token": 0,
+                }
+            },
+            persist_across_reloads=False,
+        )
+        response_data: Final = {"scores": [0.9, 0.1], "input_tokens": input_tokens, "request_id": "priced"}
+        raw_response: Final = MagicMock(spec=httpx.Response)
+        raw_response.json.return_value = response_data
+        raw_response.text = json.dumps(response_data)
+        rerank_response: Final = self.config.transform_rerank_response(
+            model=model,
+            raw_response=raw_response,
+            model_response=RerankResponse(),
+            logging_obj=MagicMock(),
+        )
+
+        cost: Final = litellm.completion_cost(completion_response=rerank_response, model=model, call_type="rerank")
+
+        assert cost == pytest.approx(input_tokens * price_per_token)

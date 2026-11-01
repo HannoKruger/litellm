@@ -48,6 +48,7 @@ FETCH_TIMEOUT: Final = int(os.getenv("PROVIDER_PRICING_TIMEOUT", "30"))
 STARTUP_DELAY_SECONDS: Final = int(os.getenv("PROVIDER_PRICING_STARTUP_DELAY", "45"))
 CACHE_PREFIX: Final = "provider_pricing:last_known:"
 PER_MILLION: Final = 1_000_000
+CENTS_PER_DOLLAR: Final = 100
 
 
 # --------------------------------------------------------------------------
@@ -171,7 +172,43 @@ class DeepInfra(PricingSource):
         return out
 
 
-SOURCES: Final[tuple[PricingSource, ...]] = (DeepInfra(),)
+class DeepInfraRerankers(PricingSource):
+    """DeepInfra's OpenAI-compatible catalogue omits rerankers; its native one
+    lists them, priced in US cents per input token."""
+
+    name = "deepinfra_rerankers"
+    catalogue = "https://api.deepinfra.com/models/list"
+
+    def entries(self) -> dict[str, dict]:
+        return {
+            f"deepinfra/{model['model_name']}": self._entry(model)
+            for model in self.fetch()
+            if self._is_token_priced_reranker(model)
+        }
+
+    @staticmethod
+    def _is_token_priced_reranker(model: dict) -> bool:
+        pricing = model.get("pricing") or {}
+        return (
+            model.get("type") == "reranker"
+            and pricing.get("type") == "input_tokens"
+            and pricing.get("cents_per_input_token") is not None
+        )
+
+    @staticmethod
+    def _entry(model: dict) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            "litellm_provider": "deepinfra",
+            "mode": "rerank",
+            "input_cost_per_token": model["pricing"]["cents_per_input_token"] / CENTS_PER_DOLLAR,
+            "output_cost_per_token": 0.0,
+        }
+        if model.get("max_tokens"):
+            entry["max_input_tokens"] = model["max_tokens"]
+        return entry
+
+
+SOURCES: Final[tuple[PricingSource, ...]] = (DeepInfra(), DeepInfraRerankers())
 
 
 # --------------------------------------------------------------------------
