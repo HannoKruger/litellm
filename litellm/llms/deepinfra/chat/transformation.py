@@ -1,5 +1,5 @@
 import json
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 from typing import Any, Final, Literal, cast, overload
 
 import httpx
@@ -13,6 +13,15 @@ from litellm.secret_managers.main import get_secret_str
 from litellm.types.llms.openai import AllMessageValues
 
 DEEPINFRA_DEFAULT_API_BASE: Final = "https://api.deepinfra.com/v1/openai"
+# Uncapped, a looping model runs to 384,000 tokens (over an hour) past the request timeout, and DeepInfra bills
+# the abandoned attempt that LiteLLM never logs. 16k tokens took 228 s in testing; 32k took up to ~600 s.
+DEEPINFRA_MAX_OUTPUT_TOKENS: Final = 16_384
+
+
+def _capped_max_tokens(requested: object) -> int:
+    if isinstance(requested, int):
+        return min(requested, DEEPINFRA_MAX_OUTPUT_TOKENS)
+    return DEEPINFRA_MAX_OUTPUT_TOKENS
 
 
 class _DeepInfraModelEntry(BaseModel):
@@ -127,6 +136,9 @@ class DeepInfraConfig(OpenAIGPTConfig):
             elif param in supported_openai_params:
                 if value is not None:
                     optional_params[param] = value
+        optional_params["max_tokens"] = _capped_max_tokens(
+            cast(Mapping[str, object], optional_params).get("max_tokens")
+        )
         return optional_params
 
     def _transform_tool_message_content(self, messages: list[AllMessageValues]) -> list[AllMessageValues]:

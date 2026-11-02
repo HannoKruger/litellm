@@ -191,3 +191,22 @@ async def test_shared_session_transport_rebuilds_with_socket_factory(monkeypatch
     assert mock_tcp_connector.call_count == 1
     assert callable(mock_tcp_connector.call_args.kwargs.get("socket_factory"))
     assert mock_tcp_connector.call_args.kwargs["keepalive_timeout"] == http_handler_module.AIOHTTP_KEEPALIVE_TIMEOUT
+
+
+def test_sockets_get_tcp_keepalive_by_default_so_long_silent_responses_are_not_dropped():
+    import os
+    import subprocess
+    import sys
+
+    probe = (
+        "import socket\n"
+        "from litellm.llms.custom_httpx.http_handler import _build_aiohttp_keepalive_socket_factory\n"
+        "factory = _build_aiohttp_keepalive_socket_factory()\n"
+        "sock = factory((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('127.0.0.1', 0)))\n"
+        "print(sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))\n"
+    )
+    environment = {key: value for key, value in os.environ.items() if key != "AIOHTTP_SO_KEEPALIVE"}
+
+    result = subprocess.run([sys.executable, "-c", probe], env=environment, capture_output=True, text=True, check=True)
+
+    assert result.stdout.strip() == "1"

@@ -7,6 +7,7 @@ import pytest
 
 # Add litellm to path
 import litellm
+from litellm.llms.deepinfra.chat.transformation import DEEPINFRA_MAX_OUTPUT_TOKENS
 
 
 def test_deepseek_supported_openai_params(monkeypatch):
@@ -315,3 +316,24 @@ def test_get_models_still_raises_on_non_auth_errors():
 
     with pytest.raises(Exception, match="503"):
         DeepInfraConfig().get_models(api_key="sk-test", client=client)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ({}, DEEPINFRA_MAX_OUTPUT_TOKENS),
+        ({"max_tokens": DEEPINFRA_MAX_OUTPUT_TOKENS * 2}, DEEPINFRA_MAX_OUTPUT_TOKENS),
+        ({"max_completion_tokens": DEEPINFRA_MAX_OUTPUT_TOKENS + 1}, DEEPINFRA_MAX_OUTPUT_TOKENS),
+        ({"max_tokens": 500}, 500),
+        ({"max_completion_tokens": 700}, 700),
+    ],
+)
+def test_deepinfra_output_is_capped_so_runaway_generations_cannot_outlive_the_request(requested, expected):
+    optional_params = litellm.utils.get_optional_params(
+        model="deepseek-ai/DeepSeek-V4-Flash-0731",
+        custom_llm_provider="deepinfra",
+        **requested,
+    )
+
+    assert optional_params["max_tokens"] == expected
+    assert "max_completion_tokens" not in optional_params

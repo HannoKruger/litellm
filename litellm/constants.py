@@ -297,7 +297,9 @@ AIOHTTP_TTL_DNS_CACHE: Final = int(os.getenv("AIOHTTP_TTL_DNS_CACHE", 300))
 # during a long provider call and the NAT reaps the flow before the response
 # arrives. Enabling SO_KEEPALIVE makes the kernel emit TCP probes that reset
 # the NAT idle timer.
-AIOHTTP_SO_KEEPALIVE: Final = os.getenv("AIOHTTP_SO_KEEPALIVE", "False").lower() == "true"
+# Homelab: on by default. titan's path to DeepInfra silently drops a connection idle for ~4 minutes, so a
+# finished non-streaming response never arrives, LiteLLM times out and retries, and the lost attempt is billed.
+AIOHTTP_SO_KEEPALIVE: Final = os.getenv("AIOHTTP_SO_KEEPALIVE", "True").lower() == "true"
 AIOHTTP_TCP_KEEPIDLE: Final = int(os.getenv("AIOHTTP_TCP_KEEPIDLE", 60))
 AIOHTTP_TCP_KEEPINTVL: Final = int(os.getenv("AIOHTTP_TCP_KEEPINTVL", 30))
 AIOHTTP_TCP_KEEPCNT: Final = int(os.getenv("AIOHTTP_TCP_KEEPCNT", 5))
