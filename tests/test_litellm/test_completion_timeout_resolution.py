@@ -4,9 +4,11 @@ import os
 import sys
 
 import httpx
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
+from litellm.constants import DEEPINFRA_REQUEST_TIMEOUT_SECONDS
 from litellm.litellm_core_utils.completion_timeout import CompletionTimeout
 from litellm.utils import supports_httpx_timeout
 
@@ -142,3 +144,38 @@ def test_httpx_timeout_preserved_for_openai():
     )
     assert out is t
     assert isinstance(out, httpx.Timeout)
+
+
+@pytest.mark.parametrize(
+    ("model_timeout", "kwargs", "global_timeout", "expected"),
+    [
+        (600.0, {}, None, DEEPINFRA_REQUEST_TIMEOUT_SECONDS),
+        (None, {}, 6000.0, DEEPINFRA_REQUEST_TIMEOUT_SECONDS),
+        (None, {}, None, DEEPINFRA_REQUEST_TIMEOUT_SECONDS),
+        (httpx.Timeout(900.0, connect=5.0), {}, None, DEEPINFRA_REQUEST_TIMEOUT_SECONDS),
+        (None, {"request_timeout": 45.0}, None, 45.0),
+        (60.0, {}, None, 60.0),
+    ],
+)
+def test_deepinfra_calls_never_wait_longer_than_the_deepinfra_timeout(model_timeout, kwargs, global_timeout, expected):
+    resolved = CompletionTimeout.resolve(
+        model_timeout,
+        kwargs,
+        "deepinfra",
+        global_timeout=global_timeout,
+        supports_httpx_timeout=supports_httpx_timeout,
+    )
+
+    assert resolved == expected
+
+
+def test_deepinfra_timeout_does_not_shorten_other_providers():
+    resolved = CompletionTimeout.resolve(
+        600.0,
+        {},
+        "openai",
+        global_timeout=None,
+        supports_httpx_timeout=supports_httpx_timeout,
+    )
+
+    assert resolved == 600.0

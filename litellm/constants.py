@@ -544,6 +544,7 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS: Final[float] = 6000.0
 # Pair used for default httpx clients when no custom timeout is passed: read/write
 # deadline and connect handshake (see ``http_handler`` cached handler paths).
 COMPLETION_HTTP_FALLBACK_SECONDS: Final[float] = 600.0
+DEEPINFRA_REQUEST_TIMEOUT_SECONDS: Final = 300.0
 HTTP_HANDLER_CONNECT_TIMEOUT_SECONDS: Final[float] = 5.0
 SEMANTIC_CACHE_EMBEDDING_TIMEOUT_SECONDS: Final[float] = float(
     os.getenv("SEMANTIC_CACHE_EMBEDDING_TIMEOUT_SECONDS", "5.0")

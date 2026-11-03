@@ -7,7 +7,7 @@ from typing import Final
 
 import httpx
 
-from litellm.constants import COMPLETION_HTTP_FALLBACK_SECONDS
+from litellm.constants import COMPLETION_HTTP_FALLBACK_SECONDS, DEEPINFRA_REQUEST_TIMEOUT_SECONDS
 
 
 class CompletionTimeout:
@@ -67,4 +67,6 @@ class CompletionTimeout:
         elif not isinstance(resolved, httpx.Timeout):
             resolved = float(resolved)
 
+        if custom_llm_provider == "deepinfra" and isinstance(resolved, float):
+            return min(resolved, DEEPINFRA_REQUEST_TIMEOUT_SECONDS)
         return resolved
